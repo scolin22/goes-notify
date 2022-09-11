@@ -12,6 +12,7 @@ import os
 import glob
 import requests
 import hashlib
+import time
 
 from datetime import datetime
 from os import path
@@ -75,9 +76,9 @@ def notify_send_email(dates, current_apt, settings, use_gmail=False):
         server.quit()
     except Exception:
         logging.exception('Failed to send succcess e-mail.')
-        log(e)
 
 def notify_osx(msg):
+    logging.info('sending osx notification')
     commands.getstatusoutput("osascript -e 'display notification \"%s\" with title \"Global Entry Notifier\"'" % msg)
 
 def notify_sms(settings, dates):
@@ -113,7 +114,7 @@ def main(settings):
     	# parse the json
         if not data:
             logging.info('No tests available.')
-            return
+            return False
 
         current_apt = datetime.strptime(settings['current_interview_date_str'], '%B %d, %Y')
         dates = []
@@ -125,12 +126,12 @@ def main(settings):
                     dates.append(dtp.strftime('%A, %B %d @ %I:%M%p'))
 
         if not dates:
-            return
+            return False
 
         hash = hashlib.md5(''.join(dates) + current_apt.strftime('%B %d, %Y @ %I:%M%p')).hexdigest()
         fn = "goes-notify_{0}.txt".format(hash)
         if settings.get('no_spamming') and os.path.exists(fn):
-            return
+            return False
         else:
             for f in glob.glob("goes-notify_*.txt"):
                 os.remove(f)
@@ -139,7 +140,7 @@ def main(settings):
 
     except OSError:
         logging.critical("Something went wrong when trying to obtain the openings")
-        return
+        return False
 
     msg = 'Found new appointment(s) in location %s on %s (current is on %s)!' % (settings.get("enrollment_location_id"), dates[0], current_apt.strftime('%B %d, %Y @ %I:%M%p'))
     logging.info(msg + (' Sending email.' if not settings.get('no_email') else ' Not sending email.'))
@@ -150,6 +151,8 @@ def main(settings):
         notify_send_email(dates, current_apt, settings, use_gmail=settings.get('use_gmail'))
     if settings.get('twilio_account_sid'):
         notify_sms(settings, dates)
+
+    return True
 
 def _check_settings(config):
     required_settings = (
@@ -209,4 +212,8 @@ if __name__ == '__main__':
 
     logging.debug('Running cron with arguments: %s' % arguments)
 
-    main(settings)
+    while not main(settings):
+        logging.info("no appointments found, sleeping")
+        time.sleep(3600)
+
+    logging.info("found appointment, exiting")
